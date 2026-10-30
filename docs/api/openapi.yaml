@@ -1,0 +1,1297 @@
+openapi: 3.1.0
+info:
+  title: IT Incident Triage System REST API
+  description: |
+    Production-ready REST API for the **IT Incident Triage System**.
+    Combines asynchronous ticket intake, Gemini AI-driven semantic triage,
+    deterministic ITIL 3x3 priority matrix, Grounded RAG knowledge retrieval,
+    and Human-in-the-Loop (HITL) review & override.
+  version: 1.0.0
+  contact:
+    name: IT Incident Triage Engineering Team
+    email: support@incident-triage.internal
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Development Server
+  - url: https://staging-api.incident-triage.internal/api/v1
+    description: Staging Environment
+  - url: https://api.incident-triage.internal/api/v1
+    description: Production Environment
+
+tags:
+  - name: Authentication
+    description: User authentication, JWT tokens, and session management
+  - name: Self-Service Deflection
+    description: Real-time RAG suggestions to deflect ticket creation
+  - name: Incidents
+    description: Core incident lifecycle, state machine transitions, and querying
+  - name: Human-in-the-Loop Review
+    description: HITL 1-click approve or human override of AI triage suggestions
+  - name: Grounded Knowledge & RAG
+    description: Historical similar incident search and SOP Runbook retrieval
+  - name: Observability & Analytics
+    description: Real-time operational KPIs and AI engineering metrics
+  - name: System Health & Monitoring
+    description: Service health checks and asynchronous task execution status
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login & JWT token issuance
+      description: Authenticates user credentials and returns a signed JWT access token.
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current authenticated user profile
+      description: Returns information about the user owning the provided Bearer token.
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate active user session on the client side.
+      operationId: logoutUser
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successfully logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Đăng xuất thành công.
+
+  /deflection/suggest:
+    post:
+      tags:
+        - Self-Service Deflection
+      summary: Real-time self-service suggestions (Smart Deflection)
+      description: Matches knowledge articles and FAQs using RAG while the user types ticket details.
+      operationId: suggestDeflection
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeflectionSuggestRequest'
+      responses:
+        '200':
+          description: Matched knowledge articles and resolution steps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeflectionSuggestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /deflection/feedback:
+    post:
+      tags:
+        - Self-Service Deflection
+      summary: Record deflection outcome feedback
+      description: Records whether the suggested knowledge article resolved the user's issue without ticket creation.
+      operationId: recordDeflectionFeedback
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeflectionFeedbackRequest'
+      responses:
+        '200':
+          description: Feedback recorded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: Cảm ơn bạn! Sự cố đã được ghi nhận giải quyết tự phục vụ.
+
+  /incidents:
+    post:
+      tags:
+        - Incidents
+      summary: Report a new incident (Fast Intake < 200ms)
+      description: Creates a new incident in PENDING_TRIAGE state and dispatches background AI triage task.
+      operationId: createIncident
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        '201':
+          description: Incident created and enqueued for AI triage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIncidentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags:
+        - Incidents
+      summary: List incidents with multi-dimensional filtering & pagination
+      description: Retrieves incidents. End-users see only their reported incidents; IT Support & Admin see all.
+      operationId: listIncidents
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Items per page
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          description: Filter by incident lifecycle status
+          schema:
+            $ref: '#/components/schemas/IncidentStatus'
+        - name: priority
+          in: query
+          description: Filter by ITIL priority
+          schema:
+            $ref: '#/components/schemas/ITILPriority'
+        - name: category
+          in: query
+          description: Filter by category
+          schema:
+            type: string
+            example: Software
+        - name: is_dlq
+          in: query
+          description: Filter incidents sent to Dead-Letter Queue needing manual triage
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          description: Search term in incident_number or title
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          description: Sort field
+          schema:
+            type: string
+            default: created_at
+            enum: [created_at, priority, sla_response_deadline]
+        - name: order
+          in: query
+          description: Sort direction
+          schema:
+            type: string
+            default: desc
+            enum: [asc, desc]
+      responses:
+        '200':
+          description: Paginated incident collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /incidents/{id}:
+    get:
+      tags:
+        - Incidents
+      summary: Get incident details, AI triage results, and review history
+      description: Returns full incident data including AI confidence, reasoning, missing info check, and review audit.
+      operationId: getIncidentById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the incident
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detailed incident object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /incidents/{id}/status:
+    patch:
+      tags:
+        - Incidents
+      summary: Transition incident status (State Machine)
+      description: Validates and updates the incident lifecycle status. Requires resolution summary when marking RESOLVED.
+      operationId: updateIncidentStatus
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the incident
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStatusRequest'
+      responses:
+        '200':
+          description: Status transition successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateStatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /incidents/{id}/review:
+    post:
+      tags:
+        - Human-in-the-Loop Review
+      summary: HITL 1-Click Approve or Human Override
+      description: Allows IT Support / Admin to approve AI suggested triage or override category/priority with a mandatory reason.
+      operationId: reviewIncident
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of the incident
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentReviewRequest'
+      responses:
+        '200':
+          description: Review recorded and incident transitioned to TRIAGED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentReviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /knowledge/similar:
+    get:
+      tags:
+        - Grounded Knowledge & RAG
+      summary: Retrieve similar resolved incidents
+      description: Uses vector similarity to fetch past resolved incidents and their proven solutions.
+      operationId: getSimilarIncidents
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: incident_id
+          in: query
+          required: true
+          description: UUID of the incident to find matches for
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          description: Maximum number of incidents to return
+          schema:
+            type: integer
+            default: 3
+            maximum: 10
+      responses:
+        '200':
+          description: Top similar historical incidents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarIncidentsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /knowledge/runbooks:
+    get:
+      tags:
+        - Grounded Knowledge & RAG
+      summary: Retrieve SOP Runbook procedures and checklist
+      description: Matches standard operating procedures and technical checklists for the incident category.
+      operationId: getRunbooks
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          required: true
+          description: Incident category name
+          schema:
+            type: string
+            example: Software
+        - name: affected_service
+          in: query
+          description: Optional affected service identifier
+          schema:
+            type: string
+            example: Payment POS Gateway
+      responses:
+        '200':
+          description: Relevant runbook and step-by-step checklist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunbookResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /analytics/dashboard:
+    get:
+      tags:
+        - Observability & Analytics
+      summary: Get real-time operational and AI observability metrics
+      description: Returns SLA compliance, MTTR, P1-P4 distribution, deflection rate, and AI override rate.
+      operationId: getDashboardMetrics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: time_range
+          in: query
+          description: Time window for statistics
+          schema:
+            type: string
+            default: 7d
+            enum: [24h, 7d, 30d, all]
+      responses:
+        '200':
+          description: Aggregated operational and AI metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMetricsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /health:
+    get:
+      tags:
+        - System Health & Monitoring
+      summary: System health & dependency status check
+      description: Returns liveness and readiness of API server, PostgreSQL database, and Gemini LLM connectivity.
+      operationId: getSystemHealth
+      responses:
+        '200':
+          description: Service health details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /tasks/{incident_id}:
+    get:
+      tags:
+        - System Health & Monitoring
+      summary: Check asynchronous background triage task status
+      description: Polls the state of the background AI triage task for a given incident.
+      operationId: getTaskStatus
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          description: UUID of the incident
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Task execution state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Provide the JWT token obtained from `/auth/login`.
+
+  schemas:
+    UserRole:
+      type: string
+      enum: [END_USER, IT_SUPPORT, ADMIN]
+      example: IT_SUPPORT
+
+    IncidentStatus:
+      type: string
+      enum:
+        - PENDING_TRIAGE
+        - AI_SUGGESTED
+        - MANUAL_TRIAGE_REQUIRED
+        - TRIAGED
+        - IN_PROGRESS
+        - RESOLVED
+        - CLOSED
+      example: AI_SUGGESTED
+
+    ITILPriority:
+      type: string
+      enum: [P1, P2, P3, P4]
+      example: P1
+
+    ImpactLevel:
+      type: string
+      enum: [HIGH, MEDIUM, LOW]
+      example: HIGH
+
+    UrgencyLevel:
+      type: string
+      enum: [HIGH, MEDIUM, LOW]
+      example: HIGH
+
+    QueueTaskStatus:
+      type: string
+      enum: [QUEUED, PROCESSING, RETRYING, COMPLETED, FAILED, DEAD_LETTER]
+      example: COMPLETED
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: support.lead@company.internal
+        password:
+          type: string
+          format: password
+          example: SecurePassword123!
+
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          example: 3600
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    UserProfile:
+      type: object
+      required: [id, email, full_name, role, is_active]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11
+        email:
+          type: string
+          format: email
+          example: support.lead@company.internal
+        full_name:
+          type: string
+          example: Nguyễn Văn Hùng
+        role:
+          $ref: '#/components/schemas/UserRole'
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: 2026-10-15T08:00:00Z
+
+    DeflectionSuggestRequest:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+          example: Không thể kết nối VPN công ty từ xa
+        description:
+          type: string
+          example: Tôi mở Cisco AnyConnect nhưng liên tục nhận lỗi Gateway unreachable - Error 442.
+        affected_service:
+          type: string
+          example: VPN Gateway
+
+    DeflectionSuggestionItem:
+      type: object
+      required: [article_id, title, summary, steps, confidence_score]
+      properties:
+        article_id:
+          type: string
+          example: KB-VPN-002
+        title:
+          type: string
+          example: Khắc phục lỗi Cisco AnyConnect Gateway unreachable (Error 442)
+        summary:
+          type: string
+          example: Lỗi do adapter mạng ảo bị khóa hoặc xung đột DNS nội bộ.
+        steps:
+          type: array
+          items:
+            type: string
+          example:
+            - Disable rồi Enable lại Cisco AnyConnect Virtual Adapter
+            - Chạy netsh winsock reset trong CMD Administrator
+            - Đăng nhập lại với mã OTP mới
+        confidence_score:
+          type: number
+          format: float
+          example: 0.92
+        source_url:
+          type: string
+          example: https://wiki.company.internal/kb/vpn-error-442
+
+    DeflectionSuggestResponse:
+      type: object
+      required: [suggestions]
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeflectionSuggestionItem'
+
+    DeflectionFeedbackRequest:
+      type: object
+      required: [article_id, is_resolved]
+      properties:
+        article_id:
+          type: string
+          example: KB-VPN-002
+        search_query:
+          type: string
+          example: Không thể kết nối VPN công ty
+        is_resolved:
+          type: boolean
+          example: true
+        user_feedback_comment:
+          type: string
+          example: Hướng dẫn rất rõ ràng, tự reset adapter xong kết nối được ngay.
+
+    CreateIncidentRequest:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+          example: Hệ thống thanh toán qua cổng POS chi nhánh Quận 1 không phản hồi
+        description:
+          type: string
+          example: Toàn bộ máy POS tại quầy thu ngân báo lỗi timeout không kết nối được server trung tâm lúc 14:15.
+        affected_service:
+          type: string
+          example: Payment POS Gateway
+
+    CreateIncidentResponse:
+      type: object
+      required: [id, incident_number, title, status, reporter_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: e7b0c3d4-1a2b-4c5d-8e9f-0a1b2c3d4e5f
+        incident_number:
+          type: string
+          example: INC-2026-0142
+        title:
+          type: string
+          example: Hệ thống thanh toán qua cổng POS chi nhánh Quận 1 không phản hồi
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        reporter_id:
+          type: string
+          format: uuid
+          example: a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11
+        created_at:
+          type: string
+          format: date-time
+          example: 2026-10-30T14:15:30Z
+        message:
+          type: string
+          example: Sự cố đã tiếp nhận thành công. AI đang phân loại ngầm.
+
+    IncidentListItem:
+      type: object
+      required: [id, incident_number, title, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        incident_number:
+          type: string
+          example: INC-2026-0142
+        title:
+          type: string
+          example: Hệ thống POS lỗi kết nối
+        affected_service:
+          type: string
+          example: Payment POS Gateway
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        category:
+          type: string
+          example: Software
+        impact:
+          $ref: '#/components/schemas/ImpactLevel'
+        urgency:
+          $ref: '#/components/schemas/UrgencyLevel'
+        priority:
+          $ref: '#/components/schemas/ITILPriority'
+        reporter:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            full_name:
+              type: string
+            email:
+              type: string
+        ai_triage:
+          type: object
+          properties:
+            suggested_category:
+              type: string
+            suggested_priority:
+              $ref: '#/components/schemas/ITILPriority'
+            confidence_score:
+              type: number
+            has_missing_info:
+              type: boolean
+        sla_response_deadline:
+          type: string
+          format: date-time
+        sla_resolution_deadline:
+          type: string
+          format: date-time
+        is_dlq:
+          type: boolean
+          example: false
+        created_at:
+          type: string
+          format: date-time
+
+    PaginationMeta:
+      type: object
+      required: [total, page, limit, total_pages, has_next, has_prev]
+      properties:
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 3
+        has_next:
+          type: boolean
+          example: true
+        has_prev:
+          type: boolean
+          example: false
+
+    IncidentListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentListItem'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    AITriageResult:
+      type: object
+      required: [id, suggested_category, suggested_impact, suggested_urgency, suggested_priority, confidence_score, reasoning]
+      properties:
+        id:
+          type: string
+          format: uuid
+        suggested_category:
+          type: string
+          example: Software
+        suggested_impact:
+          $ref: '#/components/schemas/ImpactLevel'
+        suggested_urgency:
+          $ref: '#/components/schemas/UrgencyLevel'
+        suggested_priority:
+          $ref: '#/components/schemas/ITILPriority'
+        confidence_score:
+          type: number
+          format: float
+          example: 0.94
+        reasoning:
+          type: string
+          example: Sự cố làm tê liệt thanh toán chi nhánh, áp dụng ma trận 3x3: HIGH x HIGH = P1.
+        missing_info:
+          type: object
+          properties:
+            is_missing:
+              type: boolean
+              example: false
+            missing_fields:
+              type: array
+              items:
+                type: string
+            suggested_inquiry:
+              type: string
+              nullable: true
+        model_name:
+          type: string
+          example: gemini-1.5-flash
+        created_at:
+          type: string
+          format: date-time
+
+    IncidentReviewRecord:
+      type: object
+      required: [id, accepted_ai_suggestion, final_category, final_priority, reviewed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accepted_ai_suggestion:
+          type: boolean
+          example: false
+        final_category:
+          type: string
+          example: Hardware
+        final_priority:
+          $ref: '#/components/schemas/ITILPriority'
+        override_reason:
+          type: string
+          nullable: true
+          example: Kiểm tra phát hiện chỉ có 1 máy bị lỏng dây cắm nguồn.
+        reviewer:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            full_name:
+              type: string
+        reviewed_at:
+          type: string
+          format: date-time
+
+    IncidentDetailResponse:
+      type: object
+      required: [id, incident_number, title, description, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        incident_number:
+          type: string
+          example: INC-2026-0142
+        title:
+          type: string
+        description:
+          type: string
+        affected_service:
+          type: string
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        category:
+          type: string
+        impact:
+          $ref: '#/components/schemas/ImpactLevel'
+        urgency:
+          $ref: '#/components/schemas/UrgencyLevel'
+        priority:
+          $ref: '#/components/schemas/ITILPriority'
+        sla_response_deadline:
+          type: string
+          format: date-time
+        sla_resolution_deadline:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        reporter:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            full_name:
+              type: string
+            email:
+              type: string
+        assignee:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            full_name:
+              type: string
+            email:
+              type: string
+        ai_triage_result:
+          $ref: '#/components/schemas/AITriageResult'
+          nullable: true
+        review:
+          $ref: '#/components/schemas/IncidentReviewRecord'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        note:
+          type: string
+          example: Đã khởi động lại Transaction Proxy service.
+        resolution_summary:
+          type: string
+          description: Mandatory when transitioning to RESOLVED status
+          example: Reset router mạng và thay cáp nguồn mới cho máy POS.
+
+    UpdateStatusResponse:
+      type: object
+      required: [id, status, message]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        message:
+          type: string
+          example: Cập nhật trạng thái thành công.
+
+    IncidentReviewRequest:
+      type: object
+      required: [accepted_ai_suggestion]
+      properties:
+        accepted_ai_suggestion:
+          type: boolean
+          example: false
+        final_category:
+          type: string
+          example: Hardware
+        final_priority:
+          $ref: '#/components/schemas/ITILPriority'
+        override_reason:
+          type: string
+          description: Mandatory if accepted_ai_suggestion is false (min 10 chars)
+          example: Kiểm tra thực tế chỉ hỏng nguồn 1 máy duy nhất.
+
+    IncidentReviewResponse:
+      type: object
+      required: [review_id, incident_id, status, accepted_ai_suggestion, final_category, final_priority, is_human_override, reviewed_at]
+      properties:
+        review_id:
+          type: string
+          format: uuid
+        incident_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        accepted_ai_suggestion:
+          type: boolean
+        final_category:
+          type: string
+        final_priority:
+          $ref: '#/components/schemas/ITILPriority'
+        is_human_override:
+          type: boolean
+          example: true
+        override_reason:
+          type: string
+          nullable: true
+        reviewer:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            full_name:
+              type: string
+        reviewed_at:
+          type: string
+          format: date-time
+
+    SimilarIncidentItem:
+      type: object
+      required: [incident_number, title, category, priority, similarity_score, solution]
+      properties:
+        incident_number:
+          type: string
+          example: INC-2026-0089
+        title:
+          type: string
+          example: Cổng kết nối POS chi nhánh Bình Thạnh mất tín hiệu
+        category:
+          type: string
+          example: Software
+        priority:
+          $ref: '#/components/schemas/ITILPriority'
+        similarity_score:
+          type: number
+          format: float
+          example: 0.88
+        solution:
+          type: string
+          example: Khởi động lại router mạng phụ và cấp lại chứng chỉ SSL cho máy POS.
+
+    SimilarIncidentsResponse:
+      type: object
+      required: [similar_incidents]
+      properties:
+        similar_incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarIncidentItem'
+
+    RunbookChecklistItem:
+      type: object
+      required: [step, task, required]
+      properties:
+        step:
+          type: integer
+          example: 1
+        task:
+          type: string
+          example: Kiểm tra kết nối ping tới default gateway nội bộ.
+        required:
+          type: boolean
+          example: true
+
+    RunbookResponse:
+      type: object
+      required: [runbook_id, title, source_document, checklist]
+      properties:
+        runbook_id:
+          type: string
+          example: SOP-POS-01
+        title:
+          type: string
+          example: Quy trình ứng cứu sự cố hệ thống thanh toán POS
+        source_document:
+          type: string
+          example: SOP_POS_Gateway_Troubleshooting_v2.1.pdf
+        checklist:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunbookChecklistItem'
+
+    DashboardMetricsResponse:
+      type: object
+      required: [operational_metrics, ai_engineering_metrics]
+      properties:
+        operational_metrics:
+          type: object
+          required: [total_incidents, priority_distribution, sla_compliance_rate, mean_time_to_resolve_minutes]
+          properties:
+            total_incidents:
+              type: integer
+              example: 154
+            priority_distribution:
+              type: object
+              properties:
+                P1:
+                  type: integer
+                  example: 12
+                P2:
+                  type: integer
+                  example: 38
+                P3:
+                  type: integer
+                  example: 64
+                P4:
+                  type: integer
+                  example: 40
+            sla_compliance_rate:
+              type: number
+              format: float
+              example: 96.8
+            sla_breached_count:
+              type: integer
+              example: 5
+            mean_time_to_resolve_minutes:
+              type: number
+              format: float
+              example: 42.5
+        ai_engineering_metrics:
+          type: object
+          required: [deflection_rate, deflected_count, ai_accuracy_rate, human_override_rate, avg_worker_latency_ms, dlq_fallback_rate]
+          properties:
+            deflection_rate:
+              type: number
+              format: float
+              example: 38.5
+            deflected_count:
+              type: integer
+              example: 96
+            ai_accuracy_rate:
+              type: number
+              format: float
+              example: 84.6
+            human_override_rate:
+              type: number
+              format: float
+              example: 15.4
+            override_breakdown_by_category:
+              type: object
+              additionalProperties:
+                type: number
+            avg_worker_latency_ms:
+              type: integer
+              example: 1120
+            dlq_fallback_rate:
+              type: number
+              format: float
+              example: 1.2
+
+    HealthCheckResponse:
+      type: object
+      required: [status, version, timestamp, components]
+      properties:
+        status:
+          type: string
+          example: HEALTHY
+        version:
+          type: string
+          example: 1.0.0
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+          properties:
+            database:
+              type: string
+              example: CONNECTED
+            gemini_api:
+              type: string
+              example: REACHABLE
+            queue_worker:
+              type: string
+              example: ACTIVE
+
+    TaskStatusResponse:
+      type: object
+      required: [incident_id, task_type, status, attempts, max_attempts]
+      properties:
+        incident_id:
+          type: string
+          format: uuid
+        task_type:
+          type: string
+          example: AI_TRIAGE
+        status:
+          $ref: '#/components/schemas/QueueTaskStatus'
+        attempts:
+          type: integer
+          example: 1
+        max_attempts:
+          type: integer
+          example: 3
+        error_message:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+
+    ErrorDetailItem:
+      type: object
+      required: [field, issue]
+      properties:
+        field:
+          type: string
+          example: priority
+        issue:
+          type: string
+          example: Giá trị không hợp lệ. Phải là P1, P2, P3 hoặc P4.
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, timestamp, path]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              example: Dữ liệu gửi lên không thỏa mãn định dạng quy định.
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetailItem'
+            timestamp:
+              type: string
+              format: date-time
+            path:
+              type: string
+              example: /api/v1/incidents
+
+  responses:
+    BadRequestError:
+      description: Bad Request (Invalid parameters or illegal state transition)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    UnauthorizedError:
+      description: Unauthorized (Token missing or expired)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    ForbiddenError:
+      description: Forbidden (Insufficient role permissions)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    ValidationError:
+      description: Unprocessable Entity (Schema validation failed)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
