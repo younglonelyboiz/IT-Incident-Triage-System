@@ -5,14 +5,14 @@
 
 ### Bảng kiểm tra tiêu chuẩn INVEST
 
-| Nguyên tắc | Áp dụng trong Backlog này |
+| Nguyên tắc | Áp dụng trong backlog này |
 | :--- | :--- |
-| **Independent** | Mỗi story tạo ra kết quả chạy độc lập, kiểm thử được ngay mà không phụ thuộc chéo. |
-| **Negotiable** | Giao diện và công nghệ linh hoạt (FastAPI/Express, SQLite/Postgres), tập trung giữ đúng logic lõi. |
-| **Valuable** | Thể hiện rõ nét kỹ năng **Backend Engineering (Queue, State Machine)** kết hợp **AI Engineering (NLP/LLM, Human-in-the-loop)**. |
-| **Estimable** | Phạm vi cực kỳ rõ ràng, mỗi story tốn từ 1–2 ngày công làm việc. |
-| **Small** | Chỉ gồm **7 stories cốt lõi** cho MVP, vừa vặn hoàn thành trong 2 tuần. |
-| **Testable** | Tiêu chí nghiệm thu (Acceptance Criteria) viết theo điều kiện kỹ thuật đo lường được. |
+| **Independent** | Mỗi story tạo ra một kết quả độc lập, có thể demo được và chỉ liệt kê các phụ thuộc thực sự không thể tránh. |
+| **Negotiable** | Bố cục giao diện, lựa chọn framework (FastAPI/Express, SQLite/Postgres) và chi tiết triển khai có thể thay đổi, trong khi logic lõi và phân quyền theo vai trò vẫn cố định. |
+| **Valuable** | Mỗi story đặt tên rõ lợi ích cụ thể cho người dùng hoặc hệ thống — từ tiếp nhận sự cố, phân loại tự động bằng AI đến quyền ghi đè của con người. |
+| **Estimable** | Mỗi story có đầu vào, đầu ra, vai trò và luồng lỗi tường minh, giúp ước lượng công sức dễ dàng (1–2 ngày/story). |
+| **Small** | Mỗi story nhắm vào một khả năng duy nhất và có thể tách thành các task API, persistence, background worker và UI một cách độc lập. |
+| **Testable** | Mỗi story liên kết với tiêu chí nghiệm thu quan sát được, viết theo điều kiện kỹ thuật đo lường được. |
 
 ---
 

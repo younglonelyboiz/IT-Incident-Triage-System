@@ -12,7 +12,10 @@ Tài liệu yêu cầu định nghĩa các năng lực của hệ thống, đố
 
 ![Product Mind Map](docs/images/mindmap.png)
 
-Chi tiết cấu trúc điều hướng trang và phân rã các section xem tại [Information Architecture](docs/INFORMATION_ARCHITECTURE.md).
+Chi tiết cấu trúc phạm vi, tính năng và điều hướng trang xem tại:
+* [01-SCOPE.md](docs/01-SCOPE.md)
+* [02-FEATURES.md](docs/02-FEATURES.md)
+* [04-INFORMATION_ARCHITECTURE.md](docs/04-INFORMATION_ARCHITECTURE.md)
 
 ### 1.2 Yêu cầu chuẩn INVEST (INVEST Requirements)
 Backlog phiên bản cốt lõi (V1 Core MVP) gồm **7 User Stories** trọng tâm, bao quát từ tiếp nhận, xử lý nền đến kiểm duyệt con người:
@@ -38,9 +41,8 @@ Trước khi sẵn sàng phát triển, mỗi User Story đều được kiểm 
 Chi tiết toàn bộ bảng phân kỳ Product Backlog (MVP, V2, V3) xem tại [INVEST Requirements](docs/INVEST_REQUIREMENTS.md).
 
 ### 1.3 Use Cases & Sơ đồ tương tác (Use Cases)
-Mô tả chi tiết các tác nhân, kịch bản nghiệp vụ (luồng chính, ngoại lệ, chính sách thử lại và ma trận 3×3) xem tại:
-* [Actors, Roles & Use Cases](docs/USE_CASES.md)
-* [Use Case Diagram (UML)](docs/USE_CASE_DIAGRAM.md)
+Mô tả chi tiết các tác nhân, sơ đồ UML, kịch bản nghiệp vụ (luồng chính, ngoại lệ, chính sách thử lại và ma trận 3×3) xem tại:
+* [03-USE_CASES.md](docs/03-USE_CASES.md)
 
 ### 1.4 Phân quyền người dùng (Roles & Permissions)
 
