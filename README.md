@@ -210,3 +210,273 @@ graph LR
 ---
 
 *Chi tiết toàn bộ báo cáo thiết kế:* [UXUI_DESIGN_REPORT.md](./docs/UXUI_DESIGN_REPORT.md)
+
+---
+
+## 5. Kiến trúc Hệ thống (C4 Model Architecture)
+
+Hệ thống được thiết kế theo mô hình **C4 Model** chuẩn hóa toàn diện 4 cấp độ (Simon Brown Architecture):
+* **C1: System Context Diagram** — Ranh giới hệ thống, 3 nhóm tác nhân (`End-User`, `IT Support`, `Admin`) và kết nối `Gemini LLM API`.
+* **C2: Container Diagram** — Phân rã kiến trúc tinh gọn (KISS / YAGNI): SPA Frontend (React), Backend API & Task Worker (FastAPI), Primary Database (PostgreSQL) và không phụ thuộc Redis.
+* **C3: Component Diagram** — Bóc tách chi tiết 9 module nội bộ của Backend API: State Machine, Queue Dispatcher & Task Runner (BackgroundTasks + DLQ fallback), AI Semantic Extractor, ITIL Priority Matrix Engine và Grounded RAG.
+* **C4: Code & State Machine Diagram** — Thiết kế cấu trúc mã nguồn, quy tắc chuyển đổi trạng thái vòng đời sự cố và cơ chế retry DLQ *(Đang triển khai)*.
+
+### 5.1 C1 — System Context Diagram
+
+```mermaid
+flowchart LR
+    enduser(["End-User"])
+    itsupport(["IT Support (L1/L2)"])
+    admin(["Administrator"])
+
+    subgraph boundary[" "]
+        system["IT Incident Triage System<br/><i>[Software System]</i><br/>Tự động tiếp nhận, phân loại danh mục sự cố,<br/>tính toán độ ưu tiên ITIL (P1–P4), gợi ý Runbook,<br/>và hỗ trợ phê duyệt Human-in-the-Loop"]
+    end
+
+    gemini[("Gemini LLM API<br/><i>[External System]</i><br/>Trích xuất ngữ nghĩa sự cố,<br/>phát hiện missing info & gợi ý RAG")]
+
+    enduser -- "báo sự cố, nhận gợi ý tự sửa lỗi, theo dõi tiến độ" --> system
+    itsupport -- "xem Workbench, 1-click Approve hoặc Override (HITL)" --> system
+    admin -- "giám sát SLA compliance, MTTR và AI Observability" --> system
+    system -- "gửi prompt & schema, nhận JSON trích xuất" --> gemini
+
+    style system fill:#1168bd,color:#fff
+```
+
+---
+
+### 5.2 C2 — Container Diagram
+
+```mermaid
+flowchart TD
+    users(["End-User /<br/>IT Support /<br/>Administrator"])
+    gemini[("Gemini LLM API<br/><i>[External System]</i><br/>Mô hình ngôn ngữ lớn<br/>trích xuất ngữ nghĩa & RAG")]
+
+    subgraph boundary["IT Incident Triage System [Software System Boundary]"]
+        subgraph presentation["Presentation"]
+            frontend["Web Frontend<br/><i>[Container: React 19 + Vite]</i><br/>UI, routing, incident forms, bàn làm việc Workbench,<br/>HITL approval controls, và SLA dashboard"]
+        end
+
+        subgraph application["Application"]
+            backend["Backend API & Task Worker<br/><i>[Container: FastAPI (Python 3.12)]</i><br/>Xác thực JWT, RBAC, Incident State Machine,<br/>ITIL matrix rule engine, và BackgroundTasks runner"]
+        end
+
+        subgraph data["Data"]
+            db[("PostgreSQL 16<br/><i>[Container: Database]</i><br/>Users, incidents, runbooks,<br/>audit logs, và bảng task_queue")]
+        end
+    end
+
+    users --> frontend
+    frontend -- "REST / HTTPS / JSON (JWT)" --> backend
+    backend -- "SQL / PostgreSQL protocol (asyncpg)" --> db
+    backend -- "HTTPS / REST API (Pydantic Schema)" --> gemini
+
+    style frontend fill:#1168bd,color:#fff
+    style backend fill:#1168bd,color:#fff
+    style db fill:#1168bd,color:#fff
+```
+
+---
+
+### 5.3 C3 — Component Diagram (Backend API & Task Worker)
+
+```mermaid
+flowchart TB
+    subgraph rt["FastAPI Backend & Worker [Container]"]
+        direction TB
+        api["HTTP API & Routers<br/><i>[Component: FastAPI Controllers]</i><br/>Auth, Ticket, Deflection, and<br/>Dashboard REST endpoints"]
+        identity["Identity & Access<br/><i>[Component]</i><br/>JWT authentication, session/token, RBAC,<br/>and own-ticket policy"]
+        state_machine["Incident State Machine<br/><i>[Component]</i><br/>Incident lifecycle, strict transitions,<br/>and SLA deadline calculation"]
+        queue["Queue Dispatcher & Task Runner<br/><i>[Component]</i><br/>BackgroundTasks queue, retry backoff,<br/>and DLQ fallback handling"]
+        ai_triage["AI Semantic Extractor<br/><i>[Component]</i><br/>Category, impact, urgency parsing,<br/>and missing info detection"]
+        rule_engine["ITIL Priority Matrix<br/><i>[Component]</i><br/>Deterministic 3×3 matrix engine<br/>computing P1–P4 priorities"]
+        rag["Grounded RAG & Deflection<br/><i>[Component]</i><br/>Runbook SOP lookup, FAQ deflection,<br/>and similar incident search"]
+        audit["Audit Log<br/><i>[Component]</i><br/>Records business actions, transitions,<br/>and HITL override reasons"]
+        persistence["Persistence<br/><i>[Component]</i><br/>Async repositories, task_queue state,<br/>and SQL transaction mapping"]
+    end
+
+    web["Web Frontend<br/><i>[Container: React 19 + Vite]</i>"]
+    db[("PostgreSQL<br/><i>[Container: Database]</i>")]
+    ai[("Gemini LLM API<br/><i>[External Service]</i>")]
+
+    web --> api
+    api --> identity
+    api --> state_machine
+    api --> queue
+    api --> rag
+    queue --> ai_triage
+    ai_triage -.->|"prompt & Pydantic schema"| ai
+    ai_triage --> rule_engine
+    rule_engine --> queue
+    queue --> state_machine
+    identity --> persistence
+    state_machine --> persistence
+    rag --> persistence
+    state_machine -.->|"lifecycle events"| audit
+    queue -.->|"retry & DLQ events"| audit
+    api -.->|"human override events"| audit
+    audit --> persistence
+    persistence --> db
+
+    style api fill:#1168bd,color:#fff
+    style identity fill:#1168bd,color:#fff
+    style state_machine fill:#0b4f9e,color:#fff
+    style queue fill:#1168bd,color:#fff
+    style ai_triage fill:#1168bd,color:#fff
+    style rule_engine fill:#1168bd,color:#fff
+    style rag fill:#1168bd,color:#fff
+    style audit fill:#1168bd,color:#fff
+    style persistence fill:#1168bd,color:#fff
+```
+
+---
+
+
+*Chi tiết toàn bộ đặc tả kiến trúc 4 cấp độ:*
+* [c4-architechture/README.md](./docs/architechture/c4-architechture/README.md) — Tổng quan thư mục kiến trúc C4 Model
+* [01-CONTEXT.md](./docs/architechture/c4-architechture/01-CONTEXT.md) — C1: System Context, Personas & User Journeys
+* [02-CONTAINER.md](./docs/architechture/c4-architechture/02-CONTAINER.md) — C2: Web Frontend, Backend API & Worker, PostgreSQL 16
+* [03-COMPONENT.md](./docs/architechture/c4-architechture/03-COMPONENT.md) — C3: 9 Components nội bộ trong FastAPI Backend & Worker
+* [04-CODE.md](./docs/architechture/c4-architechture/04-CODE.md) — C4: Thiết kế Class Python, Pydantic Schemas, State Machine & DLQ Runner *(Đang triển khai)*
+
+---
+
+## 6. Thiết kế Cơ sở Dữ liệu (Database Design & ERD)
+
+Cơ sở dữ liệu được thiết kế trên nền tảng **PostgreSQL 16**, chuẩn hóa **3NF**, tách bạch giữa thông tin sự cố nghiệp vụ, kết quả AI phân loại, lịch sử thẩm định con người (HITL) và kiểm toán (Audit Trail).
+
+### 6.1 Sơ đồ Thực thể Quan hệ (Mermaid Entity Relationship Diagram - ERD)
+
+```mermaid
+erDiagram
+    users ||--o{ incidents : reports
+    users o|--o{ incidents : assigned_to
+    users ||--o{ incident_reviews : reviews
+    users o|--o{ incident_status_history : changes
+    users o|--o{ audit_logs : performs
+
+    incidents ||--o{ ai_triage_results : receives
+    incidents ||--o{ incident_reviews : has
+    incidents ||--o{ incident_status_history : tracks
+    incidents ||--o{ task_queue : enqueues
+    incidents ||--o{ audit_logs : generates
+
+    ai_triage_results ||--o{ incident_reviews : reviewed_by
+
+    users {
+        uuid id PK
+        varchar email UK
+        varchar full_name
+        varchar hashed_password
+        user_role role
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    incidents {
+        uuid id PK
+        varchar incident_number UK
+        uuid reporter_id FK
+        uuid assignee_id FK
+        varchar title
+        text description
+        varchar affected_service
+        incident_status status
+        itil_priority priority
+        impact_level impact
+        urgency_level urgency
+        varchar category
+        timestamptz sla_response_deadline
+        timestamptz sla_resolution_deadline
+        timestamptz resolved_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ai_triage_results {
+        uuid id PK
+        uuid incident_id FK
+        varchar suggested_category
+        impact_level suggested_impact
+        urgency_level suggested_urgency
+        itil_priority suggested_priority
+        numeric confidence_score
+        text reasoning
+        jsonb missing_info
+        varchar model_name
+        timestamptz created_at
+    }
+
+    incident_reviews {
+        uuid id PK
+        uuid incident_id FK
+        uuid reviewer_id FK
+        uuid ai_triage_result_id FK
+        boolean accepted_ai_suggestion
+        varchar final_category
+        itil_priority final_priority
+        text override_reason
+        timestamptz reviewed_at
+    }
+
+    incident_status_history {
+        uuid id PK
+        uuid incident_id FK
+        uuid changed_by FK
+        incident_status old_status
+        incident_status new_status
+        text note
+        timestamptz created_at
+    }
+
+    task_queue {
+        uuid id PK
+        uuid incident_id FK
+        varchar task_type
+        queue_task_status status
+        int attempts
+        int max_attempts
+        text error_message
+        timestamptz next_run_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    audit_logs {
+        uuid id PK
+        uuid incident_id FK
+        uuid actor_id FK
+        varchar action
+        jsonb old_state
+        jsonb new_state
+        text notes
+        timestamptz created_at
+    }
+```
+
+*Chi tiết toàn bộ đặc tả lược đồ CSDL, DBML, Indexing & Data Retention:* [DATABASE_DESIGN.md](./docs/architechture/DATABASE_DESIGN.md)
+
+---
+
+## 7. Đặc tả Giao tiếp API (OpenAPI 3.1 Specification)
+
+Toàn bộ hệ thống giao tiếp giữa **Web Frontend (React)** và **Backend API (FastAPI)** được chuẩn hóa theo chuẩn **OpenAPI 3.1.0** (RESTful, JWT Bearer Token, RBAC Scope, và RFC 7807 Error Envelope).
+
+
+### 7.1 Ma trận Nhóm Endpoints Cốt lõi
+
+| Nhóm chức năng | Phương thức & Tuyến đường (Route) | Quyền hạn (RBAC) | Nhiệm vụ chính |
+| :--- | :--- | :---: | :--- |
+| **Xác thực (Auth)** | `POST /api/v1/auth/login`<br/>`GET /api/v1/auth/me`<br/>`POST /api/v1/auth/logout` | Public<br/>Authenticated<br/>Authenticated | Cấp JWT Token, kiểm tra phiên làm việc và đăng xuất. |
+| **Gợi ý tự sửa (Deflection)** | `POST /api/v1/deflection/suggest`<br/>`POST /api/v1/deflection/feedback` | Authenticated<br/>Authenticated | RAG tìm FAQ/Runbook khi người dùng gõ mô tả; ghi nhận self-service thành công. |
+| **Quản lý sự cố (Incidents)** | `POST /api/v1/incidents`<br/>`GET /api/v1/incidents`<br/>`GET /api/v1/incidents/{id}`<br/>`PATCH /api/v1/incidents/{id}/status` | Authenticated<br/>Authenticated<br/>Authenticated<br/>IT Support, Admin | Tiếp nhận ticket (< 200ms) kích hoạt worker; lọc danh sách; xem chi tiết; chuyển trạng thái vòng đời. |
+| **Con người thẩm định (HITL)** | `POST /api/v1/incidents/{id}/review` | IT Support, Admin | 1-Click Approve hoặc Override AI Triage (bắt buộc nhập lý do). |
+| **Tri thức & RAG (Knowledge)** | `GET /api/v1/knowledge/similar`<br/>`GET /api/v1/knowledge/runbooks` | IT Support, Admin | Truy xuất top 3 sự cố tương tự trong quá khứ và tài liệu Runbook/SOP kèm Checklist. |
+| **Giám sát (Observability)** | `GET /api/v1/analytics/dashboard` | IT Support, Admin | Thống kê vận hành (SLA, MTTR, P1–P4) & AI Engineering metrics (Deflection, Override rate). |
+| **Hạ tầng (Health & Tasks)** | `GET /api/v1/health`<br/>`GET /api/v1/tasks/{incident_id}` | Public<br/>Authenticated | Healthcheck phụ thuộc (PostgreSQL, Gemini API); kiểm tra trạng thái background task. |
+
+*Tài liệu đặc tả chi tiết:*
+* [OPENAPI_SPECIFICATION.md](./docs/architechture/OPENAPI_SPECIFICATION.md) — Chi tiết schema JSON, Request/Response mẫu, mã lỗi và quy tắc nghiệp vụ.
+* [openapi.yaml](./docs/api/openapi.yaml) — File OpenAPI 3.1 YAML hoàn chỉnh, sẵn sàng import vào Swagger UI, Postman hoặc Redoc.
+

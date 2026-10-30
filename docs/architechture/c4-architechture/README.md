@@ -5,7 +5,7 @@
 
 ---
 
-## 📌 GIỚI THIỆU TỔNG QUAN
+##  GIỚI THIỆU TỔNG QUAN
 
 Tài liệu kiến trúc hệ thống được cấu trúc theo mô hình **C4 Model** (Context, Container, Component, Code), giúp phân rã kiến trúc phức tạp của giải pháp **IT Incident Triage System** thành 4 cấp độ trực quan với độ chi tiết tăng dần:
 
@@ -23,18 +23,18 @@ graph TD
 
 ---
 
-## 📂 DANH MỤC TÀI LIỆU C4 THEO CẤP ĐỘ
+##  DANH MỤC TÀI LIỆU C4 THEO CẤP ĐỘ
 
 | Cấp độ | Tài liệu | Đối tượng người đọc | Nội dung chính |
 |:---|:---|:---|:---|
 | **C1** | [01-CONTEXT.md](./01-CONTEXT.md) | Stakeholders, PM, Architect | Hệ thống giải quyết bài toán gì, ai sử dụng (Personas), kết nối với hệ thống ngoài nào. |
 | **C2** | [02-CONTAINER.md](./02-CONTAINER.md) | DevOps, System Architect, Tech Lead | Các đơn vị triển khai độc lập (Frontend, Backend, Database), giao thức kết nối & kiến trúc tinh gọn (KISS/YAGNI). |
 | **C3** | [03-COMPONENT.md](./03-COMPONENT.md) | Backend Engineers, AI Engineers | Bóc tách 9 module nội bộ trong container FastAPI: State Machine, Hàng đợi nền, Ma trận ITIL, Grounded RAG. |
-| **C4** | [04-CODE.md](./04-CODE.md) | Software Engineers, Code Reviewers | Thiết kế class Python, State Machine pattern, thuật toán ma trận 3x3, Pydantic schemas *(Trạng thái: 🟡 Đang triển khai)* |
+| **C4** | [04-CODE.md](./04-CODE.md) | Software Engineers, Code Reviewers | Thiết kế class Python, State Machine pattern, thuật toán ma trận 3x3, Pydantic schemas *(Trạng thái:  Đang triển khai)* |
 
 ---
 
-## 🎯 CÁC NGUYÊN TẮC THIẾT KẾ CỐT LÕI (ARCHITECTURAL DRIVERS)
+##  CÁC NGUYÊN TẮC THIẾT KẾ CỐT LÕI (ARCHITECTURAL DRIVERS)
 
 1. **Hiệu năng tiếp nhận (< 200ms):**
    - Tách biệt luồng nhận ticket khỏi luồng phân tích AI thông qua `BackgroundTasks` ngay trong FastAPI.
